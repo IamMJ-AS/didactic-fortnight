@@ -1,0 +1,15 @@
+$tempFolder = "e:\temp"
+$tempFolderCln = "e:\temp\clean"
+$vFiler = "\\netshare\files"
+#gathers all of the web.config information from IIS. Assumes web.config is in root of IIS site folder.
+ForEach($website in get-website){
+	$webconfigExists = test-path ($website."physicalPath"+'\web.config')
+	if ($webconfigExists){
+		$webConfig = $website."physicalPath"+'\web.config'
+		$siteName = $website.name
+		$backup = $siteName + "-" + (get-date).tostring("yyyy-MM-dd-hh")+'-web.config'
+		write-host "Copying $webConfig to \$backup"
+		copy-item $webconfig -destination "$tempFolder\$backup" -Force
+		write-host "Sanitizing passwords from web.config file in temp folder"
+		$content = Get-Content ($tempFolder + "\$backup")
+		$content | Foreach-Object {$_ -replace "(?<=password=).+?(?=&amp)", "xxxxxxx"}|%	{$_ -replace "(?<=password=).+?(?=`")", "xxxxxxx"} |set-content "$vFiler $backup"

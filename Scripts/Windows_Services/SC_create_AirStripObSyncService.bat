@@ -1,0 +1,1 @@
+sc create AirStripObSyncService binPath= "D:\AirStrip\Service\AirStripObSyncService\Airstrip.OB.SyncService.WindowsService.exe" DisplayName= "AirStripObSyncService" start= delayed-auto

@@ -1,0 +1,37 @@
+USE AirStripSiteConfiguration
+GO
+
+SET NOCOUNT ON
+GO
+
+select DATEPART(DAY,t1.StartTime) as dates, count(t1.DeviceId) as Sessions 
+FROM (SELECT   
+                SessionLog.DeviceId, 
+                SessionLog.UserName, 
+                op1.StartTime, 
+                DateAdd(SECOND, DateDiff(ss,Session.StartTime,Session.LastRefresh), op1.StartTime) as LastRefresh,
+                DateDiff(ss,Session.StartTime,Session.LastRefresh) as UsageSeconds,
+                SessionLog.Token
+FROM         
+                SessionLog 
+    RIGHT OUTER JOIN Session ON SessionLog.Token = Session.Token
+                LEFT JOIN (
+                                                                SELECT 
+                                                                                Token, 
+                                                                                OperationDescription, 
+                                                                                MIN(Timestamp) as StartTime 
+                                                                FROM 
+                                                                                OperationLog 
+                                                                WHERE 
+                                                                                OperationDescription = 'GetSiteInfo' 
+                                                                GROUP BY 
+                                                                                Token,OperationDescription
+                                                  ) op1 ON op1.Token = SessionLog.Token
+WHERE
+                DateDiff(ss,Session.StartTime,Session.LastRefresh) > 0
+                AND op1.StartTime between '01/1/2018' and '01/31/2018') AS t1
+GROUP BY DATEPART(DAY,t1.StartTime)
+ORDER BY 
+                DATEPART(DAY,t1.StartTime) asc
+
+

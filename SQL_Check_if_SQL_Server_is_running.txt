@@ -1,0 +1,7 @@
+declare @i int;
+declare @cmd varchar(max);
+
+select @i = xp_regread('HKEY_LOCAL_MACHINE\SOFTWARE\MICROSOFT\SQL Server\Status');
+
+If @i = 1
+  select 'This instance is running';

@@ -1,0 +1,14 @@
+USE AdventureWorks
+SELECT 'bcp ' + '"SELECT * FROM ' + 
+            QUOTENAME(DB_NAME())
+            + '.'
+            +QUOTENAME(SCHEMA_NAME(schema_id))
+            + '.'
+            +QUOTENAME(name)
+            + '"'+' queryout'+' '
+            + 'c:\' + name + '.csv -c -t, -T -S '
+            + @@servername
+           
+    FROM sys.objects
+    WHERE TYPE='u'
+        AND is_ms_shipped=0

@@ -1,0 +1,5 @@
+SELECT     Site.ID, Site.Name, Site.TimeZoneName, Site.ClientTimeout, Site.LogoUrl, Site.HttpClientConfigurationId, Site.MessagingEnabled, 
+                      HttpClientConfiguration.AllowsInvalidSslCertificate, HttpClientConfiguration.BaseUrl, HttpClientConfiguration.Login, HttpClientConfiguration.Password, 
+                      HttpClientConfiguration.WebUrl
+FROM         Site INNER JOIN
+                      HttpClientConfiguration ON Site.HttpClientConfigurationId = HttpClientConfiguration.ID

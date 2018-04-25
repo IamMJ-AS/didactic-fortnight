@@ -1,0 +1,293 @@
+This is my first post on SQLServerCentral and for it I decided to share a utility script that I use almost daily.  This is a simple brute force search script used to find data in an unknown location in a database.  I optimized it to work for my requirements so it may not be the best for everyone.  This script will look at every table and every column for a string, number, or datetime value.  It supports begins with, ends with, and contains for strings and returns a query of results including the count of total matches on the table and the sql needed to query that result up.
+
+I decided to post this for several reasons, one being that I havent seen any brute force search tools that support multiple options like contains, begins with, ends with, and exact match.  Secondly this script also supports number and date searches.  So this made me decide to post this up here for anyone to use. 
+
+As scripts go please realize this is not a production script.  Its an adhoc script I came up with to solve a long standing problem with data migrations.  I use this to find data because typically all I get from a client is an example via a screenshot, or examples pulled from a website.  In most cases I dont know the structure of the source db nor where this data may be sitting in it.  Now I have been through many different versions of this script, what I have posted is the end result of years of doing searches like this. Really the main hurdle here is trying to avoid RBAR as much as possible.  Originally I searched each column of each table seperately, this was fine for small dbs but would choke on larger ones, sometimes taking 3 or 4 hours to return results from a big one.  Now I am aware of the union method of doing this where you union all the queries together to make one batch to avoid the RBAR.  This would not work for me because in most cases the databases I am working with have 12000 or more varchar columns in them, far more than the 256 unions allowed in a single query.  So what I did was modifiy that idea a bit and instead focus on only doing one search per table in the db, I did this by combining the columns for each table into a large where clause.  I then refined the queries to avoid columns that are too small for the search string.  Ie if im searching for a string with 10 in length then there is no reason to look at columns less than 10 chars in length.  Doing this speeds up the result by a factor of 10 or more taking that 3-4 hour search and returning the same results in less than 2 minutes.
+
+Usage is really simple, there are 4 basic inputs for the proc, the search value, the type, if its a fuzzy search, and finally what type of fuzzy search.  Currently it supports numbers, dates, and strings. Realize that searching for something very common like the word 'the' or the number 1 would bring back almost every row in the db and be very slow, so search term choice is very important to the effectiveness of the script. Why support numbers and dates, well I have found that sometimes its benefitial to look for an number across the db when for example you need to know everything that relates to one record and where it all is in the db ie searching for a ID to see all teh tables that may relate to that one row,  or maybe I only got a date as an example to look for, ie it happened on '12-03-2016'.  So there are some times where a number or date search helps find data faster, so thats why I included them. Here are a few examples of usage:
+
+types:(string, date, number)
+fuzzy operators:(contains, beginswith, endswith)
+
+Fuzzy Matches
+String begins with:
+EXEC DBBruteForce 'yourstring','string',1,'beginswith';
+
+
+String ends with:
+EXEC DBBruteForce 'yourstring','string',1,'endswith';
+
+
+String contains:
+EXEC DBBruteForce 'yourstring','string',1,'contains';
+
+
+String exact match
+EXEC DBBruteForce 'yourstring','string',0,'contains';
+
+Dates:
+EXEC DBBruteForce '01-01-1980','date',0,'contains';
+
+Numbers:
+EXEC DBBruteForce '12348756453','number',0,'contains';
+
+As for how fast it returns results, well that depends on the search term, whether its an equals or wildcard search, the size an scope of the database its searching, and indexes available in the db that might be used for the search.  Some larger dbs might take 10 minutes to return results, smaller ones return almost instantly, so it really just depends.
+
+My typical disclaimer, this script is not perfect, it does not cover every single situation that could come up, however its written in a way to mitigate the errors for the most part and just return some results.  I am sure there are other things to optimize here but for the most part it works very effectively on large or small databases.  I know I am using a cursor here, in fact I tested while loops, cursors, and a few other ideas, cursors on average perform better here and is why I chose that route.  I am also using charindex for contains searches, in a perfect world where I had perfect indexes or time to add them to client databases then I would use 'like' over 'charindex'.  However in reality I can never rely on proper indexing, nor do i have time to fix databases that are just sources for an import.  Because of this I found overall charindex performs better than like.
+
+Finally I would love any feedback or suggestions you may have on this script.  I am always looking to improve this script so suggestions are more than welcome. Thank you and enjoy!
+
+
+-----
+IF OBJECT_ID ( 'DBBruteForce', 'P' ) IS NOT NULL 
+    DROP PROCEDURE [dbo].DBBruteForce;
+GO 
+
+CREATE PROCEDURE [dbo].[DBBruteForce]
+	@searchvalue varchar(4000),
+	@type varchar(200),
+	@fuzzy BIT,
+	@fuzzyoperator VARCHAR(200)
+AS
+BEGIN
+	--set nocount on as there could be thousands of queries here
+	SET NOCOUNT ON;
+	--build up helper table for types used later to limit rows we will query
+	DECLARE @typelist TABLE(rowid INT IDENTITY, TYPE VARCHAR(255), typename varchar(255) PRIMARY KEY(type,typename));
+	--feel free to add more in here if you need currently this only supports number, string and date
+	INSERT INTO @typelist(type,typename)
+	VALUES 
+	('number','decimal'),
+	('number','numeric'),
+	('string','char'),
+	('number','smallint'),
+	('string','varchar'),
+	('date','datetime'),
+	('string','nvarchar'),
+	('string','text'),
+	('string','ntext'),
+	('number','int'),
+	('number','bigint'),
+	('date','smalldatetime'),
+	('number','float'),
+	('number','money');
+	--now remove the temp tbles if they already exists
+
+	IF OBJECT_ID('tempdb..#TempCols') IS NOT NULL
+	DROP TABLE #TempCols;
+	
+	IF OBJECT_ID('tempdb..#TempBruteForce') IS NOT NULL
+	DROP TABLE #TempBruteForce;
+	
+	--create the temp table needed for the search
+	CREATE TABLE #TempCols(id INT IDENTITY PRIMARY KEY, tbl VARCHAR(255) NOT null, col VARCHAR(255) NOT null, TYPE varchar(255));
+	CREATE TABLE #TempBruteForce(id INT IDENTITY PRIMARY KEY, tbl VARCHAR(255) NOT null, tblqry Nvarchar(max), cnt INT DEFAULT (0),processed BIT DEFAULT(0),sqltxt Nvarchar(max),errortxt NVARCHAR(max));
+	
+	--there shouldnt be a huge need to a index here so im skipping that
+	
+	--now we have 2 seperate ways to deal with this, one for strings and one for the rest
+	IF(@type = 'string')
+	BEGIN
+		INSERT INTO #TempCols(tbl,col,type)	
+		SELECT DISTINCT '[' + ss.name + '].[' + t.name + ']' AS tblname, c.name AS colname, st.name AS coltype
+		FROM sys.tables t
+		INNER JOIN sys.columns c ON c.object_id = t.object_id
+		INNER JOIN sys.types st ON st.system_type_id = c.system_type_id AND st.name != 'sysname'
+		INNER JOIN sys.schemas ss ON ss.schema_id = t.schema_id 
+		WHERE EXISTS (SELECT 1 FROM @typelist WHERE type = @type AND typename = st.name)
+		AND (st.name IN ('ntext','text') OR c.max_length >= LEN(@searchvalue))
+		
+		--now lets combine these to lessen the load on the server dependent on what was requested by grouping these by table
+		--then combining all the columns into one where clause, this will reduce the number of searches to the number of tables with qualifying columns in them
+		--changing it a little to work with all the differnt options available
+		IF(@fuzzy = 1 AND @fuzzyoperator = 'beginswith')
+		BEGIN
+			--begins with search
+			INSERT INTO #TempBruteForce(tbl,tblqry,cnt,processed,sqltxt,errortxt)
+			SELECT t.tbl,'select count(1) from ' + tbl + ' where 1 = 1 and ('+REPLACE(x.csvvalue,'|',' or ')+')',0,0,NULL,null
+			FROM #TempCols t
+			 OUTER APPLY ( SELECT    STUFF(( SELECT  '|' + ('[' + tt.col + '] LIKE '''+@searchvalue+'%''')
+													FROM    #TempCols tt
+													WHERE   tt.tbl = t.tbl
+												  FOR
+													XML PATH(''), TYPE ).value('.[1]', 'nvarchar(max)'
+												  ), 1, 1, '') AS csvvalue
+								) x
+			GROUP BY tbl,x.csvvalue
+		END
+		ELSE IF(@fuzzy = 1 AND @fuzzyoperator = 'endswith')
+		BEGIN
+			--ends with search
+			INSERT INTO #TempBruteForce(tbl,tblqry,cnt,processed,sqltxt,errortxt)
+			SELECT t.tbl,'select count(1) from ' + tbl + ' where 1 = 1 and ('+REPLACE(x.csvvalue,'|',' or ')+')',0,0,NULL,null
+			FROM #TempCols t
+			 OUTER APPLY ( SELECT    STUFF(( SELECT  '|' + ('[' + tt.col + '] LIKE ''%'+@searchvalue+'''')
+													FROM    #TempCols tt
+													WHERE   tt.tbl = t.tbl
+												  FOR
+													XML PATH(''), TYPE ).value('.[1]', 'nvarchar(max)'
+												  ), 1, 1, '') AS csvvalue
+								) x
+			GROUP BY tbl,x.csvvalue
+		END
+		ELSE IF(@fuzzy = 0)
+		BEGIN
+			--string exact match, using like to work around text and ntext columns but with no wildcards
+			INSERT INTO #TempBruteForce(tbl,tblqry,cnt,processed,sqltxt,errortxt)
+			SELECT t.tbl,'select count(1) from ' + tbl + ' where 1 = 1 and ('+REPLACE(x.csvvalue,'|',' or ')+')',0,0,NULL,null
+			FROM #TempCols t
+			 OUTER APPLY ( SELECT    STUFF(( SELECT  '|' + ('[' + tt.col + '] LIKE '''+@searchvalue+'''')
+													FROM    #TempCols tt
+													WHERE   tt.tbl = t.tbl
+												  FOR
+													XML PATH(''), TYPE ).value('.[1]', 'nvarchar(max)'
+												  ), 1, 1, '') AS csvvalue
+								) x
+			GROUP BY tbl,x.csvvalue
+		END
+		ELSE
+		BEGIN
+			--default to contains
+			INSERT INTO #TempBruteForce(tbl,tblqry,cnt,processed,sqltxt,errortxt)
+			SELECT t.tbl,'select count(1) from ' + tbl + ' where 1 = 1 and ('+REPLACE(x.csvvalue,'|',' or ')+')',0,0,NULL,null
+			FROM #TempCols t
+			 OUTER APPLY ( SELECT    STUFF(( SELECT  '|' + ('charindex('''+@searchvalue+''',[' + tt.col + '], 1) > 0')
+													FROM    #TempCols tt
+													WHERE   tt.tbl = t.tbl
+												  FOR
+													XML PATH(''), TYPE ).value('.[1]', 'nvarchar(max)'
+												  ), 1, 1, '') AS csvvalue
+								) x
+			GROUP BY tbl,x.csvvalue
+		end
+		
+	END 
+	ELSE IF(@type = 'number')
+	BEGIN
+		--build up the columns for number search
+		INSERT INTO #TempCols(tbl,col,type)	
+		SELECT DISTINCT '[' + ss.name + '].[' + t.name + ']' AS tblname, c.name AS colname, st.name AS coltype
+		FROM sys.tables t
+		INNER JOIN sys.columns c ON c.object_id = t.object_id
+		INNER JOIN sys.types st ON st.system_type_id = c.system_type_id AND st.name != 'sysname'
+		INNER JOIN sys.schemas ss ON ss.schema_id = t.schema_id 
+		WHERE EXISTS (SELECT 1 FROM @typelist WHERE type = @type AND typename = st.name)
+		
+		--build up query texts
+		INSERT INTO #TempBruteForce(tbl,tblqry,cnt,processed,sqltxt,errortxt)	
+		SELECT t.tbl,'select count(1) from ' + tbl + ' where 1 = 1 and ('+REPLACE(x.csvvalue,'|',' or ')+')',0,0,NULL,null
+			FROM #TempCols t
+			 OUTER APPLY ( SELECT    STUFF(( SELECT  '|' + ('[' + tt.col + '] = '+@searchvalue+'')
+													FROM    #TempCols tt
+													WHERE   tt.tbl = t.tbl
+												  FOR
+													XML PATH(''), TYPE ).value('.[1]', 'nvarchar(max)'
+												  ), 1, 1, '') AS csvvalue
+								) x
+			GROUP BY tbl,x.csvvalue
+	END 
+	ELSE IF(@type = 'date')
+	BEGIN
+		--build up TABLE AND col list OF datetime columns
+		INSERT INTO #TempCols(tbl,col,type)	
+		SELECT DISTINCT '[' + ss.name + '].[' + t.name + ']' AS tblname, c.name AS colname, st.name AS coltype
+		FROM sys.tables t
+		INNER JOIN sys.columns c ON c.object_id = t.object_id
+		INNER JOIN sys.types st ON st.system_type_id = c.system_type_id AND st.name != 'sysname'
+		INNER JOIN sys.schemas ss ON ss.schema_id = t.schema_id 
+		WHERE EXISTS (SELECT 1 FROM @typelist WHERE type = @type AND typename = st.name)
+		--in this case we cast datetimes as daes to do a simple comparison, mainly to avoid a 2 millisec difference causing a non match.  
+		--Its better to error on the side of more rows idenified then less.
+		INSERT INTO #TempBruteForce(tbl,tblqry,cnt,processed,sqltxt,errortxt)	
+		SELECT t.tbl,'select count(1) from ' + tbl + ' where 1 = 1 and ('+REPLACE(x.csvvalue,'|',' or ')+')',0,0,NULL,null
+			FROM #TempCols t
+			 OUTER APPLY ( SELECT    STUFF(( SELECT  '|' + ('cast([' + tt.col + '] as date) = cast('''+@searchvalue+''' as date)')
+													FROM    #TempCols tt
+													WHERE   tt.tbl = t.tbl
+												  FOR
+													XML PATH(''), TYPE ).value('.[1]', 'nvarchar(max)'
+												  ), 1, 1, '') AS csvvalue
+								) x
+			GROUP BY tbl,x.csvvalue
+	END 
+	ELSE
+	BEGIN
+		--if the type cant be determined just error the process out
+		RAISERROR ('Unknown type encountered! string, number, and date are the only accepted types', 0, 20) WITH NOWAIT;
+	END 
+	
+	--declarations
+	DECLARE @rowcnt INT; 
+	DECLARE @operator VARCHAR(200);
+	DECLARE @where varchar(200);
+	DECLARE @sqltxt NVARCHAR(max);
+	DECLARE @SQL NVARCHAR(max);
+	DECLARE @SQL_cnt NVARCHAR(max);
+	DECLARE @ParmDefinition nVARCHAR(500);
+	DECLARE @I  INT;
+	DECLARE @id INT;
+	DECLARE @tbl varchar(255);
+	DECLARE @col VARCHAR(255);
+	DECLARE @fldtype VARCHAR(255); 
+	DECLARE @counter INT;
+	
+	DECLARE dbnames CURSOR LOCAL FORWARD_ONLY FAST_FORWARD FOR 
+	SELECT id,tbl,tblqry FROM #TempBruteForce
+	
+	OPEN dbnames
+	FETCH NEXT FROM dbnames INTO @id,@tbl,@sqltxt
+	
+	WHILE @@FETCH_STATUS = 0
+	BEGIN
+		SELECT @SQL_cnt = 'SELECT @IOUT = ('+@sqltxt+');';
+		SELECT @SQL =  @sqltxt;
+		SET @ParmDefinition = N'@IOUT INT OUTPUT';
+		
+		BEGIN TRY
+			EXEC sp_executesql 
+			@SQL_cnt, 
+			@ParmDefinition,
+			@IOUT=@I OUTPUT;
+			
+			--get count results and update the temptable, mark as processed
+			UPDATE #TempBruteForce SET cnt = @I, sqltxt = @sql, processed = 1 WHERE id = @id;
+			
+			--if @i is greater than 0 than lets print the query to the messages, allows a preview of data found before it finishes, 
+			--it can take an hour on large databases with large tables and lots of rows.  so sometimes i dont like to wait.
+			IF(@I > 0)
+			BEGIN
+				RAISERROR (@SQL, 0, 1) WITH NOWAIT;
+			END
+			ELSE
+			BEGIN
+				--i like to at least print the table out for ones nothing was found in, mainly to tell where its at in the process
+				DECLARE @temptxt VARCHAR(255);
+				SET @temptxt = @tbl + ': [no data found]'
+				RAISERROR (@temptxt, 0, 1) WITH NOWAIT;
+			end
+			
+		END TRY
+		BEGIN CATCH
+			--in this case i am interested in what errors so lets just record that one back in the temp table as an error
+			PRINT('Error occurred in table: '+@tbl+'');
+			UPDATE t SET processed = 1,errortxt = @sqltxt
+			FROM #TempBruteForce t
+			where t.id = @id;
+		END CATCH
+	
+	
+		FETCH NEXT FROM dbnames INTO @id,@tbl,@sqltxt
+	END
+	
+	CLOSE dbnames
+	DEALLOCATE dbnames
+	
+	SELECT 'Search Results';
+	SELECT * FROM #TempBruteForce WHERE cnt > 0 ORDER BY cnt DESC;
+	SELECT 'Errors Encountered';
+	SELECT * FROM #TempBruteForce WHERE LEN(errortxt) > 0;
+
+	SET NOCOUNT OFF;
+	
+END
+GO 

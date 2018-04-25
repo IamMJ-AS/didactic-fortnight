@@ -1,0 +1,4 @@
+SELECT GETDATE()              --your query to run
+raiserror('',0,1) with nowait --to flush the buffer
+waitfor delay '00:00:10'      --pause for 10 seconds
+GO 5                          --loop 5 times

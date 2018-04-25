@@ -1,0 +1,109 @@
+We can use this SQL Script to get Overdue databases list which have not been backed-up from last 24 hrs.
+
+Note: We can change the Rotation in this SQL Script.
+
+We can use this SQL Script as input in SQLCMD/OSQL command as:
+
+Put Overdue database SQL query into "C:\temp_rahul\Overdue.sql"
+
+-S = Server Name here is "local\sql"
+
+-U = User Name here is SA
+
+-d = Database Name here is master
+
+-i = Input SQL file here as "C:\temp_rahul\Overdue.sql"
+
+-n = Print path here as C:\temp_rahul\Overdue.txt
+
+osql -Slocal\sql -Usa -Ppass@#123 -dmaster  -i "C:\temp_rahul\Overdue.sql"-w180 -n >> "C:\temp_rahul\Overdue.txt"
+
+
+
+DECLARE	@li_rowcount int
+DECLARE @ldt_timelimit	datetime
+DECLARE	@lvc_msg varchar(2000)
+DECLARE @hidden varchar(50)
+
+SET NOCOUNT ON
+SET ROWCOUNT 0
+
+
+SET ANSI_WARNINGS OFF 
+
+-- Create and populate temp table with most recent full backup date
+
+
+create table #tempexc (CustID varchar (150),Rotation int, DOW int )
+if exists (select * from master.dbo.sysobjects where id = object_id(N'[master].[dbo].[_OverdueBackups_Exceptions]') )
+begin
+  insert into #tempExc (CustID,Rotation,DOW) (select * from [master].[dbo].[_OverdueBackups_Exceptions])
+  select @hidden = ' * '
+end
+else 
+  select @hidden = '   '
+insert into #tempexc (CustID,[Rotation],[DOW]) values ('pubs',0,0)
+insert into #tempexc (CustID,[Rotation],[DOW]) values ('tempdb',0,0)
+insert into #tempexc (CustID,[Rotation],[DOW]) values ('Northwind',0,0)
+ 
+
+SELECT	sdb.name, Max(backup_start_date) AS backup_start_date, 0 Rotation
+INTO	#OverdueBackups
+FROM	master.sys.databases sdb LEFT OUTER JOIN
+	msdb.dbo.backupset bs on bs.database_name = sdb.name
+WHERE	(bs.type ='D' OR bs.type ='I' OR bs.type IS NULL) AND state_desc IN ('ONLINE') AND replica_id is null
+GROUP BY sdb.name
+ORDER BY sdb.name
+
+-- Remove anything with a Rotation of 0 i.e. to be ignored
+delete #OverdueBackups
+where name in  (select  CustID from #tempexc where Rotation = 0)
+
+-- Set default Rotation = 24hrs (We can change it)
+update #OverdueBackups 
+set #OverdueBackups.Rotation = -24
+
+--Set Rotation period of any exceptions
+update #OverdueBackups 
+set #OverdueBackups.Rotation = #tempexc.Rotation
+from  #tempexc 
+where name =  CustID and #tempexc.Rotation < 0
+-- Remove databases backed up within the time limit
+-- Note Rotations defined as Negative values
+
+
+
+
+
+
+
+
+DELETE	#OverdueBackups
+WHERE	backup_start_date > DateAdd( hh, Rotation, GetDate() )
+-- Anything left is overDue
+
+PRINT CHAR(13)+CHAR(10)
+SELECT	@li_rowcount = COUNT(name) FROM	#OverdueBackups
+
+-- If any rows left
+IF @li_rowcount > 0
+  BEGIN
+   PRINT @@Servername + @hidden+ space(25- len(@@Servername)) + + CHAR(9) + 
+        ' - SOME or ALL BACKUPS OVERDUE (NOTE: Take backup of databases wherever required.)'  +
+	     CHAR(13)+CHAR(10)
+	SELECT CAST ('' + name + '''' AS char(100)) AS '                    Overdue backups',
+		CASE WHEN backup_start_date IS NULL THEN '-- Never backed up' 
+		                                    ELSE '-- '+CAST(backup_start_date AS varchar(19)) 
+		END  AS '   Last Full backup', Rotation as [Rotation period]
+	FROM #OverdueBackups
+	ORDER BY CASE WHEN backup_start_date IS NULL THEN '2' ELSE '1' END, name
+  END
+ELSE
+  PRINT @@Servername + SPACE(26- len(@@Servername)) + ' - ALL OK' +@hidden+ CHAR(13)+CHAR(10)
+
+
+DROP TABLE #tempexc
+DROP TABLE #OverdueBackups
+GO
+
+

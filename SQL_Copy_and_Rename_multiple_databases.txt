@@ -1,0 +1,73 @@
+USE [MASTER]
+
+--Truncate TABLE DBAADMIN..moveTable
+
+DECLARE @DelOldDatabases int = 0; --if 1 old databases will be deleted 
+DECLARE @OldName VARCHAR(50) --old database name 
+DECLARE @NewName VARCHAR(50) --new database name 
+DECLARE @BackupPath VARCHAR (50) = 'F:\TempSql\'  --path to temp backups
+DECLARE @DATAPATH  VARCHAR (50) = 'd:\mssql\data\'--path to data directory
+DECLARE @LOGPATH  VARCHAR (50) = 'e:\mssql\logs\' --path to logs directory
+DECLARE @sql varchar(255)
+
+DECLARE db_cursor CURSOR FOR  
+SELECT OldName, NewName
+FROM DBAADMIN..MOVETABLE
+
+OPEN db_cursor 
+FETCH NEXT FROM db_cursor INTO  @OldName, @NewName
+
+WHILE @@FETCH_STATUS = 0   
+BEGIN 
+	
+	PRINT @OldName;  PRINT @NewName; 
+	--check if new database already exists, if so, drop.
+	IF EXISTS (SELECT name FROM master.dbo.sysdatabases WHERE name = @NewName )
+	SET @SQL = 'DROP DATABASE [' + @NewName + ']'
+	PRINT @SQL;
+	EXEC (@SQL); 
+	PRINT''; 
+	SET @SQL = 'BACKUP DATABASE [' + @OldName + '] TO DISK = ''' + @BackupPath + @OldName + ''''
+	PRINT @SQL;
+	EXEC (@SQL);
+	PRINT'';
+	PRINT 'backup ready';
+ 	PRINT'';
+ 	--restore the database
+	SET @sql = 'RESTORE DATABASE [' + @NewName + '] FROM DISK = ''' + @BackupPath + @OldName + ''' WITH RECOVERY, MOVE ''' +
+	@OldName  + ''' TO ''' + @DATAPATH + @NewName + '.mdf'', MOVE ''' + @OldName + '_LOG' + ''' TO ''' + @LOGPATH + @NewName + '.ldf''' 
+	PRINT @SQL;
+	EXEC (@SQL);
+	PRINT'';
+	--rename logical files
+	SET @sql = 'ALTER DATABASE [' + @NewName + '] MODIFY FILE (NAME=N''' + @OldName + ''',NEWNAME=N''' + @NewName +''' )'
+	PRINT @SQL;
+	EXEC (@SQL);
+	SET @sql = 'ALTER DATABASE [' + @NewName  + '] MODIFY FILE (NAME=N''' + @OldName + '_log'',NEWNAME=N'''+ @NewName +'_log'')'
+	PRINT @SQL;
+	EXEC (@SQL);
+	--show result
+	SET @sql = 'USE ['+ @NewName +'] EXEC sp_helpfile'
+	PRINT @SQL;
+	EXEC (@SQL);
+
+	PRINT'';
+	--set owner to SA
+	--SET @sql = 'USE ' + '['+ @NewName + ']' +' EXEC sp_changedbowner ''sa''' 
+    --EXEC (@sql) 
+	--PRINT @SQL;
+    --PRINT'';
+    --delete original database if so desired
+    IF @DelOldDatabases = 1 SET @sql = 'DROP DATABASE [' + @OldName + ']'
+    PRINT @SQL
+	EXEC (@SQL);
+    PRINT'';
+    FETCH NEXT FROM db_cursor INTO @OldName, @NewName
+END   
+
+CLOSE db_cursor   
+DEALLOCATE db_cursor 
+
+EXEC XP_cmdshell 'del  "F:\TempSql\*"/Q'
+
+--USE [xxx] EXEC sp_helpfile

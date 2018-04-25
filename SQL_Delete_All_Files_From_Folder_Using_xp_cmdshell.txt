@@ -1,0 +1,29 @@
+declare	@cmd varchar(100),
+@Path varchar(200) ,
+@FileName varchar(255)
+
+select	@Path = '\\Servername\Drive\D$\'  <--- Mention the PAth
+
+declare	@objFSO int
+declare @i int
+declare	@File varchar(1000)
+
+select @cmd = 'dir /B ' + @Path
+create table #dir(files varchar(1000))
+
+insert #dir exec master..xp_cmdshell @cmd
+
+select * from #dir
+
+while exists (select files from #dir where files is not null)
+begin
+select @filename = max(files) from #dir
+--Print @filename 
+select @File = @Path + @fileName
+exec sp_OACreate 'Scripting.FileSystemObject', @objFSO out
+exec sp_OAMethod @objFSO,'DeleteFile', null, @File
+exec sp_OADestroy @objFSO 
+delete from #dir where files = @filename
+end
+
+drop table #dir

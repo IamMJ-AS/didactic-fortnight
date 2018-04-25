@@ -1,0 +1,1 @@
+Get-WindowsFeature | ? { $_.Installed -AND $_.SubFeatures.Count -eq 0 } | Export-Clixml "$($env:computername)_$(get-date -f yyyy-MM-dd-HH-mm)_Roles_And_Features_Configuration.xml"

@@ -1,0 +1,66 @@
+1. Copy and paste the code on managment studio
+
+2. Make sure you change the @username to the name you want
+
+3. Make sure the username exists
+
+4. run create database <db_name>
+
+5. check if the user is added to the role in the created databse
+
+
+
+
+
+
+USE [master]
+GO
+/****** Object:  DdlTrigger [TRG_DB_CREATE_ASSIGN_DB_OWNER]    Script 
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TRIGGER [TRG_DB_CREATE_ASSIGN_DB_OWNERROLE]
+ON ALL SERVER 
+FOR CREATE_DATABASE 
+AS 
+    DECLARE 
+         @NewDBName NVARCHAR(500)
+        , @SQLSTR NVARCHAR(500)
+		, @userName NVARCHAR(100)
+
+	set @userName = 'testuser'
+
+
+		SELECT @NewDBName = EVENTDATA().value('(/EVENT_INSTANCE/DatabaseName)[1]','NVARCHAR(128)')
+
+		
+			BEGIN
+					SET @SQLSTR = 'USE ' + @NewDBName + ';
+					CREATE USER '+ @userName + ' FOR LOGIN ' + @userName +' WITH DEFAULT_SCHEMA=[dbo]'
+					EXEC (@SQLSTR)
+
+					SET @SQLSTR = '
+					USE ' + @NewDBName + ';
+					EXEC sp_addrolemember N''db_owner'', '''+@userName +''''
+					EXEC (@SQLSTR);
+			END
+	
+
+GO
+
+SET ANSI_NULLS OFF
+GO
+
+SET QUOTED_IDENTIFIER OFF
+GO
+
+ENABLE TRIGGER [TRG_DB_CREATE_ASSIGN_DB_OWNER2] ON ALL SERVER
+GO
+
+
+
+
+
+
+

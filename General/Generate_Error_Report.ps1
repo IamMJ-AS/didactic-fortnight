@@ -1,0 +1,1 @@
+get-childitem "D:\AirStrip\Logging\" -rec | select-string -pattern "error" >D:\Airstrip\Error_Report.txt

@@ -1,0 +1,10 @@
+insert into amp.dbo.SiteData
+(SiteId, Value, Type, IsActive)
+select distinct XYZY, value, 'ob', 1 
+from [SynchronizationService].dbo.ElementData where ElementTypeName='unitname'
+
+
+insert into amp.dbo.SiteData
+(SiteId, Value, Type, IsActive)
+select distinct 1437, value, 'ob', 1 
+from [SynchronizationService].dbo.ElementData where ElementTypeName='unitname'

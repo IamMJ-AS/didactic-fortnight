@@ -1,0 +1,129 @@
+--- Target: Compare the tables in two database
+--- Date: 20/10/2014
+--- Author: Andres Michaca Trujillo 
+USE [SSIS]
+GO
+/****** Object:  StoredProcedure [dbo].[Compara_Table_Structure]    Script Date: 29/10/2014 03:21:45 p. m. ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER  PROCEDURE [dbo].[Compara_Table_Structure]
+(
+	@DATABASE1	VARCHAR(500),
+	@DATABASE2	VARCHAR(500)
+)
+AS
+BEGIN;
+ declare @countDataBase1      int
+ declare @countDatabase2      int
+ declare @Table_name          varchar(50)
+ DECLARE @SQL	              VARCHAR(MAX);
+
+SET NOCOUNT  on
+
+
+ SET @DATABASE1 = REPLACE(REPLACE(@DATABASE1, '[',''), ']','');	
+ SET @DATABASE2 = REPLACE(REPLACE(@DATABASE2, '[',''), ']','');
+
+ SELECT  @countDataBase1=count(*) FROM master.dbo.sysdatabases
+ where ltrim(rtrim(name))=@DATABASE1;
+
+ SELECT  @countDataBase2=count(*) FROM master.dbo.sysdatabases
+ where ltrim(rtrim(name))=@DATABASE2;
+
+IF @countDataBase1=0  and  @countDataBase2=0
+   BEGIN;
+	 PRINT 'Las bases de datos a comparar no existe..!!!'
+	 RETURN;
+   END;
+IF @countDataBase1=0 
+   BEGIN;
+	 PRINT 'La base de datos que se compara no existe..!!!'
+	 RETURN;
+    END;
+IF @countDataBase2=0
+   BEGIN;
+	 PRINT 'La base de datos donde se compara no existe..!!!'
+	 RETURN;
+   END
+IF @countDataBase1=1  and  @countDataBase2=1
+   begin;
+     Print 'Inicia comparación de las bases de datos ' + @DATABASE1 + ' y ' + @DATABASE2 + ' ..!!!'
+   end
+DECLARE @tables	TABLE
+(
+  Table_name			varchar(50)
+)
+
+set @sql= '
+select a.table_name from ['+ltrim(rtrim(@DATABASE1))+'].INFORMATION_SCHEMA.tables a 
+inner join ['+ ltrim(rtrim(@DATABASE2))+'].INFORMATION_SCHEMA.tables b on
+a.table_name=b.TABLE_NAME;'
+insert into @tables
+EXEC (@sql)
+
+DECLARE Tables_compare CURSOR FOR  
+SELECT Table_name 
+FROM  @tables order by Table_name
+
+OPEN Tables_compare   
+FETCH NEXT FROM Tables_compare INTO @Table_name    
+
+WHILE @@FETCH_STATUS = 0   
+BEGIN 
+    SET @SQL = '
+    WITH tableA AS (
+                SELECT COLUMN_NAME, 
+				       DATA_TYPE + 
+				       case 
+				           when CHARACTER_MAXIMUM_LENGTH is null then '''' 
+					       else '' (''+CAST(CHARACTER_MAXIMUM_LENGTH as varchar(10))+'')'' 
+				       end as DATA_TYPE
+                FROM ['+@DATABASE1+'].INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_NAME = '''+ltrim(rtrim(@Table_name))+''')
+        ,tableB AS (
+                SELECT COLUMN_NAME, 
+				       DATA_TYPE + 
+				       case 
+				          when CHARACTER_MAXIMUM_LENGTH is null then '''' 
+				          else '' (''+CAST(CHARACTER_MAXIMUM_LENGTH as varchar(10))+'')'' 
+				       end as DATA_TYPE
+                FROM ['+@DATABASE2+'].INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_NAME = '''+ltrim(rtrim(@Table_name))+''')
+        ,TableC AS (
+                SELECT ''Base compared => ''+'''+ltrim(rtrim(@DATABASE1))+'''+'' - Table=>''+'''+ltrim(rtrim(@Table_name))+''' [DESCRIPTION], 
+				       COLUMN_NAME, 
+					   DATA_TYPE
+	            FROM (SELECT  COLUMN_NAME, DATA_TYPE FROM tableA
+                EXCEPT
+                SELECT COLUMN_NAME, DATA_TYPE FROM tableB) TableR)
+        ,tableD AS (
+                SELECT ''Base where it is compared => ''+'''+ltrim(rtrim(@DATABASE2))+'''+'' - Table=>''+'''+ltrim(rtrim(@Table_name))+''' [DESCRIPTION], COLUMN_NAME, DATA_TYPE
+	            FROM (SELECT  COLUMN_NAME, DATA_TYPE FROM tableB
+                EXCEPT
+                SELECT COLUMN_NAME, DATA_TYPE FROM tableA) tableR)
+				SELECT * FROM tableC
+                UNION 
+                SELECT * FROM tableD;';
+     EXEC (@SQL)
+     FETCH NEXT FROM Tables_compare INTO @Table_name 
+END    
+CLOSE Tables_compare 
+DEALLOCATE Tables_compare
+
+set @sql= '
+select table_name +' + ''' => de '+ltrim(rtrim(@DATABASE1))+ ' No esta en la base de datos '+ ltrim(rtrim(@DATABASE2))+ ''' [Table_Name] from ['+ltrim(rtrim(@DATABASE1))+'].INFORMATION_SCHEMA.tables a  
+where  table_name not in (select table_name from ['+ ltrim(rtrim(@DATABASE2))+'].INFORMATION_SCHEMA.tables b)
+order by a.table_name;'
+exec (@sql)
+
+set @sql= '
+select table_name +' + ''' => de '+ltrim(rtrim(@DATABASE2))+ ' No esta en la base de datos '+ ltrim(rtrim(@DATABASE1))+ ''' [Table_Name] from ['+ltrim(rtrim(@DATABASE2))+'].INFORMATION_SCHEMA.tables a  
+where  table_name not in (select table_name from ['+ ltrim(rtrim(@DATABASE1))+'].INFORMATION_SCHEMA.tables b)
+order by a.table_name;'
+exec (@sql)
+SET NOCOUNT off
+end
+-- to run Compara_Table_Structure 'SSIS','SSISCOPIA'

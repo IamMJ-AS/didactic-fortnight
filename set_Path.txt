@@ -1,0 +1,2 @@
+:: Add AppCmd.exe to the PATH 
+setx PATH "%PATH%;

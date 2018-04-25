@@ -1,0 +1,1 @@
+sc create AirStripCardiologyAPI binPath= "E:\AirStrip\Cardio\Cardio.Api\CardioApiService.exe" DisplayName= "AirStrip ONE Cardiology API" start= delayed-auto

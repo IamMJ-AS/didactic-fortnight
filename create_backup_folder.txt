@@ -1,0 +1,15 @@
+$root_folder = 'c:\temp\root'
+
+# Create a backup folder 
+$backup_directory = New-Item -Path "$root_folder\backup_$(Get-Date -Format yyyyMMdd)" -Force -ItemType Directory
+
+Get-ChildItem -Filter *.config | ForEach-Object {
+
+    # Copy .config files to the backup directory
+    Copy-Item -Path $_.FullName -Destination "$($backup_directory.Fullname)" -Force
+
+    # Delete the file from the source directory
+    $_ | Remove-Item
+
+    # Rename the .update files to .config files.
+    Rename-Item -Path "$($_.FullName).update" -NewName $_.FullName -Force

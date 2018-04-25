@@ -1,0 +1,8 @@
+bcp [Cardio].[dbo].[Ecg]
+	out
+
+SELECT [PatientId],[EcgDetails]
+  FROM [Cardio].[dbo].[Ecg]
+  where LocationId ='999'
+	order by PatientId Desc
+

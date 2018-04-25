@@ -1,0 +1,28 @@
+print GETUTCDATE()
+print SYSDATETIMEOFFSET()
+DECLARE @datetimeoffset datetimeoffset(7)
+set @datetimeoffset = CAST(SYSDATETIMEOFFSET() AS datetimeoffset(7))
+print @datetimeoffset
+
+
+PRINT N'This message was printed on '  
+    + RTRIM(CAST(GETDATE() AS nvarchar(30)))  
+    + N'.';
+
+PRINT N'Local_Time: '
+	+ RTRIM(CAST(GETDATE() AS nvarchar(30)))
+	
+PRINT N'UTC_LocalTime_Diff: '
+	+ RTRIM(DATEDIFF(HH,GETDATE(),GETUTCDATE()) AS nvarchar(30))
+
+
+
+
+print GETDATE() as 'LocalTime'
+print DATEDIFF(HH,GETDATE(),GETUTCDATE()) as 'UTC_LocalTime_Diff'
+print SYSDATETIMEOFFSET() as 'UTC_Offset'
+
+
+
+
+[TimeZoneInfo]::Local
